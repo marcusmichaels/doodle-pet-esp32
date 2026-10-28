@@ -19,13 +19,10 @@ constexpr int TILE = 80;          // the room is redrawn in pieces up to this si
 constexpr int METERS_H = 120, INFO_BUTTON_Y = 120, ART_BUTTON_Y = 160, CLEAR_BUTTON_Y = 200,
               BUTTON_H = 40;
 
-// In the pet's room each palette colour is a tool: what you draw with it becomes that thing.
-constexpr uint8_t TOOL_FLOOR = BLACK, TOOL_ERASER = WHITE, TOOL_FRUIT = RED, TOOL_VEG = GREEN,
-                  TOOL_WATER = BLUE, TOOL_SWEETS = MAGENTA, TOOL_TOY = ORANGE, TOOL_DOOR = YELLOW;
-
-static bool isFoodTool(uint8_t c) {
-  return c == TOOL_FRUIT || c == TOOL_VEG || c == TOOL_WATER || c == TOOL_SWEETS;
-}
+// What a drawing becomes (see finishStroke): black draws floors and doors, white rubs out,
+// and in any other colour a circle is a ball, a small drawing is food and a big one a floor.
+constexpr int FOOD_MAX_STROKE = 48;  // drawings up to this size are food
+constexpr int CIRCLE_MAX = 120;      // circles up to this size are balls
 
 // ---------------------------------------------------------------------------
 // Things in the room
@@ -60,8 +57,7 @@ struct Pet {
   Act act = Act::EGG;
   uint32_t actUntil = 0;
   float targetX = 0;
-  int target = -1;            // item or ball slot
-  bool targetIsItem = false;  // PLAY: chasing a toy rather than a ball
+  int target = -1;  // food or ball slot
   float squash = 0, lookX = 0, lookY = 0, glance = 0;
   Face tempFace = Face::NEUTRAL;
   uint32_t tempFaceUntil = 0;
@@ -78,16 +74,15 @@ static Pet visitor;
 static bool visiting = false;
 static uint32_t visitEndsAt = 0, nextHugAt = 0;
 
-// Food and toys are small bitmaps of the drawing (colour indices, 0xFF transparent).
-// Both fall; toys also get pushed around.
-constexpr int MAX_ITEMS = 8, ITEM_MAX_SIZE = 80;
+// Food is a small bitmap of the drawing (colour indices, 0xFF transparent) that falls.
+constexpr int MAX_ITEMS = 8, ITEM_MAX_SIZE = 64;
 struct Item {
-  bool used = false, toy = false;
-  float x = 0, y = 0, vx = 0, vy = 0;
+  bool used = false;
+  float x = 0, y = 0, vy = 0;
   int w = 0, h = 0;
   uint8_t *px = nullptr;
   int left = 0, total = 0;
-  uint8_t kind = TOOL_FRUIT;  // the tool most of it was drawn with
+  uint8_t kind = RED;  // the colour most of it is
   float value = 1;            // bigger food is more filling
   bool resting = false, changed = false;
   uint32_t bornAt = 0, ignoreUntil = 0;
@@ -100,7 +95,7 @@ struct Ball {
   bool used = false;
   float x = 0, y = 0, vx = 0, vy = 0;
   int r = 8;
-  uint8_t colour = TOOL_TOY;
+  uint8_t colour = ORANGE;
   bool held = false;
   uint32_t bornAt = 0;
   Rect drawn{};
@@ -139,14 +134,14 @@ struct Nutrition {
   float fullness, fun, energy;
 };
 static const Nutrition NUTRITION[NUM_COLOURS] = {
-    {0, 0, 0},    // floor
-    {15, 10, 0},  // fruit
-    {0, 0, 0},    // toy
-    {0, 0, 0},    // door
-    {30, -3, 0},  // veg: good for it, not very exciting
-    {8, 0, 8},    // water
-    {5, 20, 0},   // sweets
-    {0, 0, 0},    // eraser
+    {0, 0, 0},    // black: floors, not food
+    {15, 10, 0},  // red: strawberries, apples
+    {20, 5, 0},   // orange
+    {20, 5, 0},   // yellow: bananas, cheese
+    {30, -3, 0},  // green: vegetables. Good for it, not very exciting
+    {8, 0, 8},    // blue: water
+    {5, 20, 0},   // magenta: sweets
+    {0, 0, 0},    // white: the eraser
 };
 constexpr float FAVOURITE_FUN = 12;
 
@@ -156,7 +151,7 @@ static float artLove = 0;  // how much of the hung picture is the pet's favourit
 constexpr int MAX_STROKE = 1500;
 static Pt *stroke;
 static int strokeLen = 0;
-static int drawColour = TOOL_FLOOR;
+static int drawColour = BLACK;
 
 static float rnd(float lo, float hi) { return lo + (hi - lo) * random(1001) / 1000.0f; }
 
@@ -510,7 +505,7 @@ static Walk goTo(Pet &p, float tx, float ty, uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
-// Food, toys and balls
+// Food and balls
 // ---------------------------------------------------------------------------
 static void removeItem(int i) {
   markDirty(items[i].drawn);
@@ -526,34 +521,12 @@ static bool itemSupported(const Item &it) {
   return false;
 }
 
-static bool itemSideHits(const Item &it, float nx) {
-  int col = nx > it.x ? (int)nx + it.w : (int)nx - 1;
-  for (int j = 0; j < it.h; j++) {
-    if (roomSolid(col, (int)it.y + j)) return true;
-  }
-  return false;
-}
-
 static void updateItem(Item &it) {
-  if (it.toy && it.vx != 0) {  // pushed: slides along, bouncing off walls
-    float nx = it.x + it.vx;
-    if (itemSideHits(it, nx)) {
-      it.vx *= -0.4f;
-    } else {
-      it.x = nx;
-    }
-    if (it.resting) it.vx *= 0.9f;
-    if (fabsf(it.vx) < 0.1f) it.vx = 0;
-  }
   if (it.resting) {
-    if (itemSupported(it) && it.vy >= 0) return;
-    it.resting = false;  // the floor under it was rubbed out, or it was kicked up
+    if (itemSupported(it)) return;
+    it.resting = false;  // the floor under it was rubbed out
   }
   it.vy = min(it.vy + GRAVITY, MAX_FALL);
-  if (it.vy < 0) {
-    it.y += it.vy;
-    return;
-  }
   for (float move = it.vy; move > 0; move -= 1) {
     if (itemSupported(it)) {
       it.resting = true;
@@ -624,7 +597,7 @@ static bool isActive(const Pet &p) {
   return p.act != Act::EGG && p.act != Act::SLEEP && p.act != Act::RUNAWAY;
 }
 
-// Kicks any ball or toy the pet is touching. Your pet enjoys it.
+// Kicks any ball the pet is touching. Your pet enjoys it.
 static void kickThings(Pet &p, bool isMain, uint32_t now) {
   if (!isActive(p) || now < p.nextKick) return;
   float hw = bodyW(p) / 2.0f, top = p.y - bodyH(p);
@@ -636,14 +609,6 @@ static void kickThings(Pet &p, bool isMain, uint32_t now) {
     if (dx * dx + dy * dy > b.r * b.r) continue;
     b.vx = (b.x >= p.x ? 1 : -1) * rnd(2.5, 4) + p.vx * 0.5f;
     b.vy = rnd(-4.5, -2.5);
-    kicked = true;
-  }
-  Rect body{(int)(p.x - hw), (int)top, (int)(2 * hw), bodyH(p)};
-  for (Item &it : items) {
-    if (!it.used || !it.toy || !itemRect(it).overlaps(body)) continue;
-    it.vx = (it.x + it.w / 2.0f >= p.x ? 1 : -1) * rnd(2, 3);
-    it.vy = -2;
-    it.resting = false;
     kicked = true;
   }
   if (!kicked) return;
@@ -669,58 +634,39 @@ static int pickFood(uint32_t now) {
   float bestScore = 1e9;
   for (int i = 0; i < MAX_ITEMS; i++) {
     const Item &it = items[i];
-    if (!it.used || it.toy || !it.resting || now < it.ignoreUntil) continue;
+    if (!it.used || !it.resting || now < it.ignoreUntil) continue;
     float score = fabsf(itemCx(it) - pet.x) - (it.kind == stats.favourite ? 300 : 0);
     if (score < bestScore) bestScore = score, best = i;
   }
   return best;
 }
 
-// Nearest ball or toy. Returns the slot and sets isItem for toys.
-static int nearestPlaything(const Pet &p, bool &isItem) {
+static int nearestBall(const Pet &p) {
   int best = -1;
   float bestD = 1e9;
   for (int i = 0; i < MAX_BALLS; i++) {
     float d = fabsf(balls[i].x - p.x);
-    if (balls[i].used && !balls[i].held && d < bestD) bestD = d, best = i, isItem = false;
-  }
-  for (int i = 0; i < MAX_ITEMS; i++) {
-    float d = fabsf(itemCx(items[i]) - p.x);
-    if (items[i].used && items[i].toy && d < bestD) bestD = d, best = i, isItem = true;
+    if (balls[i].used && !balls[i].held && d < bestD) bestD = d, best = i;
   }
   return best;
 }
 
-// Where the ball or toy being chased is: centre x and bottom y
-static bool playthingAt(const Pet &p, float &x, float &y) {
+// Where the ball being chased is: centre x and bottom y
+static bool chasedBall(const Pet &p, float &x, float &y) {
   if (p.target < 0) return false;
-  if (p.targetIsItem) {
-    const Item &it = items[p.target];
-    if (!it.used || !it.toy) return false;
-    x = itemCx(it);
-    y = it.y + it.h;
-  } else {
-    const Ball &b = balls[p.target];
-    if (!b.used || b.held) return false;
-    x = b.x;
-    y = b.y + b.r;
-  }
+  const Ball &b = balls[p.target];
+  if (!b.used || b.held) return false;
+  x = b.x;
+  y = b.y + b.r;
   return true;
 }
 
 static bool nightNow(uint32_t now) { return isNight() && now >= pet.awakeUntil; }
 
 static void startPlay(Pet &p, uint32_t now) {
-  bool isItem = false;
-  int t = nearestPlaything(p, isItem);
+  int b = nearestBall(p);
   setAct(p, Act::PLAY, now, 8000);
-  p.target = t;
-  p.targetIsItem = isItem;
-}
-
-static bool hasPlaything(const Pet &p) {
-  bool isItem;
-  return nearestPlaything(p, isItem) >= 0;
+  p.target = b;
 }
 
 static void decide(uint32_t now) {
@@ -739,7 +685,7 @@ static void decide(uint32_t now) {
     setAct(pet, Act::FRIEND, now, 8000);
     return;
   }
-  if (hasPlaything(pet) && stats.fun < 85 && random(100) < 70) {
+  if (nearestBall(pet) >= 0 && stats.fun < 85 && random(100) < 70) {
     startPlay(pet, now);
     return;
   }
@@ -798,7 +744,7 @@ static void bite(int i, uint32_t now) {
     spawnFx(Fx::CRUMB, it.x + col, it.y + cy, rnd(-1, 1), rnd(-2, -1), COLOURS[it.kind], 500);
   }
   if (it.kind == stats.favourite && random(2) == 0) spawnHearts(pet, 1);
-  if (it.kind == TOOL_VEG && stats.favourite != TOOL_VEG && random(3) == 0) {
+  if (it.kind == GREEN && stats.favourite != GREEN && random(3) == 0) {
     showFace(pet, Face::YUCK, now, 500);
   }
   if (it.left < it.total * 0.12f) {  // last crumbs: finish it
@@ -928,7 +874,7 @@ static void think(uint32_t now) {
 
     case Act::PLAY: {
       float tx, ty;
-      if (!playthingAt(pet, tx, ty) || now >= pet.actUntil) {
+      if (!chasedBall(pet, tx, ty) || now >= pet.actUntil) {
         setAct(pet, Act::IDLE, now, 1000);
         return;
       }
@@ -1048,7 +994,7 @@ static void thinkVisitor(uint32_t now) {
     }
     case Act::PLAY: {
       float tx, ty;
-      if (!playthingAt(v, tx, ty) || now >= v.actUntil ||
+      if (!chasedBall(v, tx, ty) || now >= v.actUntil ||
           goTo(v, tx, ty, now) == Walk::STUCK) {
         setAct(v, Act::IDLE, now, 800);
       }
@@ -1069,7 +1015,7 @@ static void thinkVisitor(uint32_t now) {
       v.walk = 0;
       if (now < v.actUntil) return;
       int r = random(100);
-      if (r < 40 && hasPlaything(v)) {
+      if (r < 40 && nearestBall(v) >= 0) {
         startPlay(v, now);
       } else if (r < 75 && pet.act != Act::EGG && pet.act != Act::RUNAWAY) {
         setAct(v, Act::FRIEND, now, 8000);
@@ -1271,7 +1217,7 @@ static int freeSlot(bool (*used)(int), uint32_t (*born)(int), int count) {
   return -oldest - 1;
 }
 
-static void spawnBall(int cx, int cy, int r) {
+static void spawnBall(int cx, int cy, int r, uint8_t colour) {
   int i = freeSlot([](int i) { return balls[i].used; }, [](int i) { return balls[i].bornAt; },
                    MAX_BALLS);
   if (i < 0) {
@@ -1283,6 +1229,7 @@ static void spawnBall(int cx, int cy, int r) {
   balls[i].x = cx;
   balls[i].y = cy;
   balls[i].r = r;
+  balls[i].colour = colour;
   balls[i].bornAt = millis();
 }
 
@@ -1347,13 +1294,13 @@ static Rect strokeArea(int x0, int y0, int x1, int y1, int maxW, int maxH) {
   return r;
 }
 
-static void addItemStroke(bool toy, int x0, int y0, int x1, int y1) {
+static void addFoodStroke(int x0, int y0, int x1, int y1) {
   Rect area = strokeArea(x0, y0, x1, y1, ITEM_MAX_SIZE, ITEM_MAX_SIZE);
-  // Strokes over a piece of food (or a toy) add to it: an apple's leaf, a car's wheels
+  // Strokes over a piece of food add to it: an apple's leaf
   int merge = -1;
   for (int i = 0; i < MAX_ITEMS; i++) {
     const Item &it = items[i];
-    if (!it.used || it.toy != toy || !itemRect(it).overlaps(area)) continue;
+    if (!it.used || !itemRect(it).overlaps(area)) continue;
     Rect both = unite(area, {(int)it.x, (int)it.y, it.w, it.h});
     if (both.w <= ITEM_MAX_SIZE && both.h <= ITEM_MAX_SIZE) {
       merge = i;
@@ -1368,7 +1315,6 @@ static void addItemStroke(bool toy, int x0, int y0, int x1, int y1) {
 
   Item it;
   it.used = true;
-  it.toy = toy;
   it.x = bm.x;
   it.y = bm.y;
   it.w = bm.w;
@@ -1420,18 +1366,18 @@ static void addDoorStroke(int x0, int y0, int x1, int y1, uint32_t now) {
   door.w = bm.w;
   door.h = bm.h;
   door.px = bm.px;
-  door.total = door.left = bm.counts[TOOL_DOOR];
+  door.total = door.left = bm.counts[BLACK];
   door.lastStrokeAt = now;
   door.knockAt = now + 2500;  // once it's finished, a friend knocks
   door.nextVisitAllowed = nextVisitAllowed;
   door.changed = true;
 }
 
-// The eraser rubs out floors, and any food, toys, balls or door it passes over.
+// The eraser rubs out floors, and any food, balls or door it passes over.
 static void eraseThings() {
   for (int k = 0; k < strokeLen; k++) {
     const Pt &a = stroke[k > 0 ? k - 1 : 0], &b = stroke[k];
-    roomInk(a.x, a.y, b.x, b.y, TOOL_ERASER);
+    roomInk(a.x, a.y, b.x, b.y, WHITE);
     forEachBrushPixel(a.x, a.y, b.x, b.y, BRUSH_R, [&](int x, int y) {
       for (Item &it : items) {
         if (!it.used || !itemRect(it).contains(x, y)) continue;
@@ -1470,29 +1416,32 @@ static void finishStroke() {
   }
   int w = x1 - x0 + 1, h = y1 - y0 + 1, big = max(w, h), small = min(w, h);
   float gap = hypotf(stroke[strokeLen - 1].x - stroke[0].x, stroke[strokeLen - 1].y - stroke[0].y);
-  uint8_t tool = stroke[0].c;
+  uint8_t c = stroke[0].c;
+  bool closed = gap <= max(12.0f, big * 0.3f);
+  bool circle = closed && len >= 2.2f * big && small >= 10 && big <= CIRCLE_MAX && small * 2 >= big;
+  bool doorShape = closed && h >= w * 1.3f && h >= 30 && w >= 14 && len >= 1.6f * (w + h);
+  // Black strokes on a door that's still being drawn (a knob, a window) are part of it
+  bool addsToDoor = door.used && now - door.lastStrokeAt < 4000 &&
+                    doorRect().overlaps(strokeArea(x0, y0, x1, y1, CANVAS_SIZE, CANVAS_SIZE));
 
-  if (tool == TOOL_FLOOR) {
+  bool ink = false;
+  if (c == WHITE) {
+    eraseThings();
+    ink = true;
+  } else if (c == BLACK && (doorShape || addsToDoor)) {
+    addDoorStroke(x0, y0, x1, y1, now);
+  } else if (c != BLACK && circle) {
+    spawnBall(x0 + w / 2, y0 + h / 2, constrain((w + h) / 4 + 1, 6, 24), c);
+  } else if (c != BLACK && big <= FOOD_MAX_STROKE) {
+    addFoodStroke(x0, y0, x1, y1);
+  } else {  // floors, walls, ramps and stairs
     for (int i = 0; i < strokeLen; i++) {
       const Pt &a = stroke[i > 0 ? i - 1 : 0], &b = stroke[i];
-      roomInk(a.x, a.y, b.x, b.y, tool);
+      roomInk(a.x, a.y, b.x, b.y, c);
     }
-  } else if (tool == TOOL_ERASER) {
-    eraseThings();
-  } else if (tool == TOOL_DOOR) {
-    addDoorStroke(x0, y0, x1, y1, now);
-  } else if (tool == TOOL_TOY) {
-    bool circle = gap <= max(10.0f, big * 0.3f) && len >= 2.2f * big && small >= 10 &&
-                  big <= 60 && small * 2 >= big;
-    if (circle) {
-      spawnBall(x0 + w / 2, y0 + h / 2, constrain((w + h) / 4 + 1, 6, 20));
-    } else {
-      addItemStroke(true, x0, y0, x1, y1);
-    }
-  } else if (isFoodTool(tool)) {
-    addItemStroke(false, x0, y0, x1, y1);
+    ink = true;
   }
-  if (tool == TOOL_FLOOR || tool == TOOL_ERASER) {
+  if (ink) {
     roomDirty = true;
     roomChangedAt = now;
   }
@@ -1515,12 +1464,17 @@ static void strokeAdd(int rx, int ry) {
 }
 
 // ---------------------------------------------------------------------------
-// The tool palette: each swatch carries a little picture of what it makes
+// Little pictures for the help page, on a swatch of the colour they're about
 // ---------------------------------------------------------------------------
-static void drawToolIcon(uint8_t tool, int cx, int cy) {
-  uint16_t bg = COLOURS[tool];
-  switch (tool) {
-    case TOOL_FLOOR: {  // stairs
+enum class Hint { STAIRS, DOOR, BALL, APPLE, LEAF, DROP, SWEET, ERASER };
+
+static void drawHint(Hint hint, uint8_t colour, int x, int y, int w, int h) {
+  uint16_t bg = COLOURS[colour];
+  int cx = x + w / 2, cy = y + h / 2;
+  tft.fillRect(x, y, w, h, bg);
+  if (colour == WHITE) tft.drawRect(x, y, w, h, TFT_LIGHTGREY);
+  switch (hint) {
+    case Hint::STAIRS: {
       const int pts[][2] = {{-9, 6}, {-3, 6}, {-3, 0}, {3, 0}, {3, -6}, {9, -6}};
       for (int i = 0; i < 5; i++) {
         tft.drawWideLine(cx + pts[i][0], cy + pts[i][1], cx + pts[i + 1][0], cy + pts[i + 1][1],
@@ -1528,55 +1482,37 @@ static void drawToolIcon(uint8_t tool, int cx, int cy) {
       }
       break;
     }
-    case TOOL_ERASER:
-      tft.fillRoundRect(cx - 9, cy - 5, 18, 10, 2, TFT_PINK);
-      tft.fillRect(cx - 9, cy - 5, 6, 10, TFT_SKYBLUE);
-      tft.drawRoundRect(cx - 9, cy - 5, 18, 10, 2, TFT_BLACK);
+    case Hint::DOOR:
+      tft.drawRoundRect(cx - 6, cy - 9, 12, 18, 3, TFT_WHITE);
+      tft.fillCircle(cx + 3, cy + 1, 1, TFT_WHITE);
       break;
-    case TOOL_FRUIT:  // apple
+    case Hint::BALL:
+      tft.fillCircle(cx, cy, 7, TFT_WHITE);
+      tft.drawFastHLine(cx - 6, cy, 13, bg);
+      break;
+    case Hint::APPLE:
       tft.fillCircle(cx, cy + 1, 6, TFT_WHITE);
       tft.fillRect(cx, cy - 8, 2, 3, TFT_WHITE);
       tft.fillEllipse(cx + 4, cy - 7, 3, 1, TFT_GREEN);
       break;
-    case TOOL_VEG:  // leaf
+    case Hint::LEAF:
       tft.fillEllipse(cx, cy, 9, 5, TFT_WHITE);
       tft.drawLine(cx - 8, cy, cx + 8, cy, bg);
       break;
-    case TOOL_WATER:  // drop
+    case Hint::DROP:
       tft.fillCircle(cx, cy + 2, 5, TFT_WHITE);
       tft.fillTriangle(cx - 5, cy + 1, cx + 5, cy + 1, cx, cy - 8, TFT_WHITE);
       break;
-    case TOOL_SWEETS:  // wrapped sweet
+    case Hint::SWEET:
       tft.fillCircle(cx, cy, 4, TFT_WHITE);
       tft.fillTriangle(cx - 3, cy, cx - 10, cy - 5, cx - 10, cy + 5, TFT_WHITE);
       tft.fillTriangle(cx + 3, cy, cx + 10, cy - 5, cx + 10, cy + 5, TFT_WHITE);
       break;
-    case TOOL_TOY:  // ball
-      tft.fillCircle(cx, cy, 7, TFT_WHITE);
-      tft.drawFastHLine(cx - 6, cy, 13, bg);
+    case Hint::ERASER:
+      tft.fillRoundRect(cx - 9, cy - 5, 18, 10, 2, TFT_PINK);
+      tft.fillRect(cx - 9, cy - 5, 6, 10, TFT_SKYBLUE);
+      tft.drawRoundRect(cx - 9, cy - 5, 18, 10, 2, TFT_BLACK);
       break;
-    case TOOL_DOOR:
-      tft.fillRoundRect(cx - 6, cy - 9, 12, 18, 3, 0xA285);
-      tft.fillCircle(cx + 3, cy + 1, 1, TFT_YELLOW);
-      break;
-  }
-}
-
-static void drawToolSwatch(uint8_t tool, int x, int y, int w, int h) {
-  tft.fillRect(x, y, w, h, COLOURS[tool]);
-  if (tool == TOOL_ERASER) tft.drawRect(x, y, w, h, TFT_LIGHTGREY);
-  drawToolIcon(tool, x + w / 2, y + h / 2);
-}
-
-static void drawToolPalette() {
-  tft.fillRect(0, 0, PALETTE_W, 240, TFT_DARKGREY);
-  for (int i = 0; i < NUM_COLOURS; i++) {
-    int y = i * SWATCH_H;
-    drawToolSwatch(i, 5, y + 4, PALETTE_W - 10, SWATCH_H - 8);
-    if (i == drawColour) {
-      tft.drawRect(1, y + 1, PALETTE_W - 2, SWATCH_H - 2, TFT_WHITE);
-      tft.drawRect(2, y + 2, PALETTE_W - 4, SWATCH_H - 4, TFT_BLACK);
-    }
   }
 }
 
@@ -1635,7 +1571,7 @@ static void drawToolbar() {
 }
 
 static void redrawAll() {
-  drawToolPalette();
+  drawPalette(drawColour);
   drawToolbar();
   uint32_t now = millis();
   updateLook(pet, true, now);
@@ -1741,23 +1677,24 @@ static void infoButton(int row, Icon icon) {
 static void drawToolsPage() {
   constexpr int TOP = 30, ROW_H = 26;
   struct Row {
-    uint8_t tool;
+    Hint hint;
+    uint8_t colour;
     const char *text;
   };
   static const Row rows[] = {
-      {TOOL_FLOOR, "Floors, ramps and stairs"},
-      {TOOL_ERASER, "Rubs out floors, food, toys"},
-      {TOOL_FRUIT, "Fruit: tasty and filling"},
-      {TOOL_VEG, "Veg: very filling, a bit dull"},
-      {TOOL_WATER, "Water: gives it energy"},
-      {TOOL_SWEETS, "Sweets: great fun, not filling"},
-      {TOOL_TOY, "Toys to kick; circles roll"},
-      {TOOL_DOOR, "Door: a friend visits (tap it)"},
+      {Hint::STAIRS, BLACK, "Lines: floors, walls, stairs"},
+      {Hint::DOOR, BLACK, "Tall black box: a door (tap)"},
+      {Hint::BALL, ORANGE, "Circles: balls to kick, throw"},
+      {Hint::APPLE, RED, "Small red/orange/yellow: fruit"},
+      {Hint::LEAF, GREEN, "Small green: veg (filling)"},
+      {Hint::DROP, BLUE, "Small blue: water (energy)"},
+      {Hint::SWEET, MAGENTA, "Small pink: sweets (fun)"},
+      {Hint::ERASER, WHITE, "White: rubs things out"},
   };
   tft.drawString("What you can draw", 6, 2, 4);
   for (int i = 0; i < 8; i++) {
     int y = TOP + i * ROW_H;
-    drawToolSwatch(rows[i].tool, 6, y + 1, 30, 22);
+    drawHint(rows[i].hint, rows[i].colour, 6, y + 1, 30, 22);
     tft.setTextDatum(TL_DATUM);
     tft.setTextColor(TFT_BLACK, TFT_WHITE);
     tft.drawString(rows[i].text, INFO_TEXT_X, y + 4, 2);
@@ -1813,7 +1750,9 @@ static void drawSettingsPage() {
 
   const char *fav = "Favourite food:";
   tft.drawString(fav, SWATCH_X, 104, 2);
-  drawToolSwatch(stats.favourite, SWATCH_X + tft.textWidth(fav, 2) + 8, 100, 30, 22);
+  int fx = SWATCH_X + tft.textWidth(fav, 2) + 8;
+  tft.fillRect(fx, 101, 30, 20, COLOURS[stats.favourite]);
+  tft.drawRect(fx, 101, 30, 20, TFT_DARKGREY);
 
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_BLACK, TFT_WHITE);
@@ -1914,7 +1853,7 @@ static void uiTap(int x, int y, uint32_t now) {
   confirmClear = false;
   if (x < PALETTE_W) {
     drawColour = constrain(y / SWATCH_H, 0, NUM_COLOURS - 1);
-    drawToolPalette();
+    drawPalette(drawColour);
     toolLedUntil = now + 1500;
     if (pet.act == Act::EGG) stats.colour = drawColour;  // paint the egg
   } else if (y >= CLEAR_BUTTON_Y) {
@@ -2031,7 +1970,7 @@ void petAppBegin() {
   } else {
     setAct(pet, Act::IDLE, now, 1000);
   }
-  drawColour = TOOL_FLOOR;
+  drawColour = BLACK;
   statsSave();
   redrawAll();
   Serial.printf("pet: started, %u bytes of memory free\n", ESP.getFreeHeap());

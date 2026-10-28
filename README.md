@@ -5,7 +5,7 @@ A drawing toy and a virtual pet for kids, running on a cheap ESP32 touchscreen b
 It has two apps, picked from a start screen at power-up:
 
 - **Drawing**: a simple paint app. Drawings are saved, and the gallery replays each one stroke by stroke, as if it's being drawn again.
-- **Pet**: a little blob that lives in a room you draw. Floors and stairs you draw are solid, food you draw drops for it to eat, toys get kicked around, and drawing a door brings a friend round to play. Its needs carry on while the board is off (with WiFi), so it has to be looked after.
+- **Pet**: a little blob that lives in a room you draw. Floors and stairs you draw are solid, food you draw drops for it to eat, circles become balls it kicks around, and drawing a door brings a friend round to play. Its needs carry on while the board is off (with WiFi), so it has to be looked after.
 
 Once a child picks an app there's no way back to the start screen without restarting, so they stay where they chose. Everything is icon-based, so non-readers can use it. The pet app has an **(i)** button with an explanation and settings for grown-ups.
 
@@ -67,30 +67,27 @@ The RGB LED on the back shows the colour you're drawing with. Touches that slip 
 
 The pet starts as an egg: tap a colour to paint it, then tap the egg three times to hatch it.
 
-Each colour in the palette is a tool, with a picture on its swatch:
+What you draw becomes part of its world, depending on its colour and shape:
 
-| Swatch | Tool | What you draw becomes |
-|---|---|---|
-| Black (stairs) | Floor | Floors, ramps, walls and stairs. The pet walks on them, steps over small lines, jumps up steps and slides down slopes. |
-| White (eraser) | Eraser | Rubs out floors, food, toys and the door |
-| Red (apple) | Fruit | Food that drops. Tasty and filling. |
-| Green (leaf) | Veg | Food: very filling, a bit boring |
-| Blue (drop) | Water | A drink: gives it energy |
-| Magenta (sweet) | Sweets | Treats: great fun, not filling |
-| Orange (ball) | Toy | Circles become balls; anything else is a toy that falls and gets pushed around. Drag a ball and let go to throw it. |
-| Yellow (door) | Door | A door. A friend comes through it to play for a minute or so, then goes home. Tap the door for another visit. |
+| Draw | Becomes |
+|---|---|
+| Lines in black (or big drawings in any colour) | Floors, walls, ramps and stairs. The pet walks on them, steps over small lines, jumps up steps and slides down slopes. |
+| A tall closed box in black | A door. A friend comes through it to play for a minute or so, then goes home. Tap the door for another visit. Black strokes added to it straight away (a knob) are part of the door. |
+| A circle in a colour | A ball in that colour. The pet kicks it; drag it and let go to throw it. |
+| A small drawing in a colour | Food that drops: red, orange or yellow is fruit, green is veg (very filling, a bit boring), blue is water (gives energy), pink is sweets (fun, not filling) |
+| White | Rubs out floors, food, balls and the door |
 
-Strokes on top of a piece of food (or a toy) join it, so an apple can get a leaf. Lifting your finger briefly and carrying on nearby continues the same stroke.
+Strokes on top of a piece of food join it, so an apple can get a leaf. Lifting your finger briefly and carrying on nearby continues the same stroke.
 
 Tap the pet to boop it, or rub it. The meters on the right are fullness, fun and energy. Each pet has a secret favourite food that makes it extra happy.
 
 - **(i)** opens two pages explaining all this, then **Settings**: change the pet's colour, see its favourite food and whether the WiFi clock is set, and start again with a new egg (tap twice; the pet walks off and an egg appears).
 - **Picture** hangs a saved drawing on the wall. The pet goes to admire it, more often if it has the pet's favourite colour in it.
-- **Bin** (tap twice) clears the floors, food, toys and door. The picture stays.
+- **Bin** (tap twice) clears the floors, food, balls and door. The picture stays.
 
 It sleeps from 19:00 to 07:00 (poking it wakes it, grumpily, for a minute) and when it runs out of energy. If its fullness or fun sits at zero for 24 hours it runs away, and a new egg appears. It grows a little over its first three days.
 
-The RGB LED shows the pet's colour, breathes slowly while it sleeps, and pulses red when it needs looking after. Picking a tool shows that tool's colour for a moment.
+The RGB LED shows the pet's colour, breathes slowly while it sleeps, and pulses red when it needs looking after. Picking a colour shows it for a moment.
 
 Tuning lives at the top of `src/pet_stats.cpp` (needs per hour) and `src/pet_stats.h` (bedtime, run-away time).
 
@@ -105,7 +102,7 @@ Everything is in LittleFS on the ESP32's flash, so it survives power-off and ref
 - `/pet/room.bin`: the room's floors and picture, as a 4-bit image
 - `/cal.bin`: touch calibration
 
-Food, toys and the door aren't saved; they're gone after a restart.
+Food, balls and the door aren't saved; they're gone after a restart.
 
 ### Code layout
 
@@ -113,7 +110,7 @@ Food, toys and the door aren't saved; they're gone after a restart.
 |---|---|
 | `src/main.cpp` | Start screen |
 | `src/draw_app.*` | Drawing app |
-| `src/pet_app.*` | Pet app: behaviour, movement, visitors, what each tool makes, input, help pages |
+| `src/pet_app.*` | Pet app: behaviour, movement, visitors, what drawings become, input, help pages |
 | `src/pet_room.*` | The room image (also what the pet collides with) and the hung picture |
 | `src/pet_stats.*` | Needs, saving, WiFi clock |
 | `src/pet_draw.*` | Drawing the pet, egg, balls and effects |

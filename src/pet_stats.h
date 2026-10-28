@@ -11,7 +11,7 @@ struct PetState {
   uint32_t magic;
   uint8_t hatched;    // 0 while it's still an egg
   uint8_t colour;     // body (or egg) colour, index into COLOURS
-  uint8_t favourite;  // favourite food tool (colour): extra happy eating it or seeing it in art
+  uint8_t favourite;  // favourite food colour: extra happy eating it or seeing it in art
   uint8_t asleep;
   float fullness, fun, energy;  // 0-100
   uint32_t ageSec;

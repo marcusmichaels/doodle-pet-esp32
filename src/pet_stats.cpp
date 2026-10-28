@@ -24,8 +24,8 @@ constexpr float ASLEEP_FULLNESS = -4, ASLEEP_FUN = -2, ASLEEP_ENERGY = 30;
 
 PetState stats;
 
-// Food tools in the pet's palette; the favourite is always one of these.
-static const uint8_t FOOD_TOOLS[] = {RED, GREEN, BLUE, MAGENTA};
+// Colours that make food; the favourite is always one of these.
+static const uint8_t FOOD_TOOLS[] = {RED, ORANGE, YELLOW, GREEN, BLUE, MAGENTA};
 
 static uint8_t randomFood() { return FOOD_TOOLS[random(sizeof(FOOD_TOOLS))]; }
 
@@ -56,7 +56,7 @@ bool statsLoad() {
   if (!ok) {
     stats.magic = 0;
     statsNewEgg();
-  } else if (!isFood(stats.favourite)) {  // saved before colours became tools
+  } else if (!isFood(stats.favourite)) {  // not a food colour (from an older version)
     stats.favourite = randomFood();
   }
   return ok;
