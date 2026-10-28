@@ -1,0 +1,9 @@
+[
+  { "label": "PIO: Build", "command": "pio run" },
+  { "label": "PIO: Upload", "command": "pio run -t upload" },
+  { "label": "PIO: Upload + Monitor", "command": "pio run -t upload && pio device monitor" },
+  { "label": "PIO: Monitor", "command": "pio device monitor" },
+  { "label": "PIO: Clean", "command": "pio run -t clean" },
+  { "label": "PIO: Refresh code completion", "command": "pio run -t compiledb" },
+  { "label": "PIO: List serial ports", "command": "pio device list" }
+]

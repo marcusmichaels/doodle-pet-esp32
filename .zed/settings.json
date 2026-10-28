@@ -1,0 +1,9 @@
+{
+  "lsp": {
+    "clangd": {
+      "binary": {
+        "arguments": ["--query-driver=**/xtensa-esp32-elf-*"]
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# clangd (used by Zed) chokes on some Xtensa GCC-only flags; strip them.
+CompileFlags:
+  Remove:
+    - -mlongcalls
+    - -mtext-section-literals
+    - -fstrict-volatile-bitfields
+    - -fno-tree-switch-conversion
+    - -fipa-pta
+    - -free
+    - -fno-shrink-wrap
+Diagnostics:
+  Suppress:
+    - pp_file_not_found
